@@ -221,35 +221,33 @@ Future<void> _updateWidgetWithData(
 
     final now = DateTime.now();
     final hour = now.hour;
-    String title = "";
+    String timeText = ""; // 'title' 변수명을 'timeText'로 의미 명확화 (오늘 점심 등)
     List<dynamic> menu = [];
     String sourceName = widgetSource.value == MealSource.a ? "기숙사 식당" : "학생회관";
 
-    // 메뉴 데이터 추출
+    // 메뉴 데이터 추출 (기존 로직 유지)
     final meals = data['meals'] ?? {};
     final breakfast = meals['조식'] ?? meals['아침'] ?? meals['breakfast'] ?? [];
     final lunch = meals['중식'] ?? meals['점심'] ?? meals['lunch'] ?? [];
     final dinner = meals['석식'] ?? meals['저녁'] ?? meals['dinner'] ?? [];
 
     if (widgetSource.value == MealSource.a) {
-      // 기숙사 식당: 00시~09시 아침, 09시~13시 점심, 13시~24시 저녁
       if (hour < 9) {
-        title = "오늘 아침";
+        timeText = "오늘 아침";
         menu = breakfast;
       } else if (hour < 13) {
-        title = "오늘 점심";
+        timeText = "오늘 점심";
         menu = lunch;
       } else {
-        title = "오늘 저녁";
+        timeText = "오늘 저녁";
         menu = dinner;
       }
     } else {
-      // 학생회관: 00시~14시 점심, 14시~24시 저녁
       if (hour < 14) {
-        title = "오늘 점심";
+        timeText = "오늘 점심";
         menu = lunch;
       } else {
-        title = "오늘 저녁";
+        timeText = "오늘 저녁";
         menu = dinner;
       }
     }
@@ -260,15 +258,22 @@ Future<void> _updateWidgetWithData(
         : menu.map((e) => "· $e").join("\n");
 
     print("위젯에 저장할 데이터:");
-    print("- title: $title");
-    print("- content: $menuText");
-    print("- source: $sourceName");
-    print("- themeMode: ${widgetTheme.value.index}");
-    print("- transparency: ${widgetTransparency.value}");
+    print("- 식당(widget_title): $sourceName");
+    print("- 시간(widget_time): $timeText");
+    print("- 메뉴(widget_menu): $menuText");
 
-    // 데이터 저장
-    await HomeWidget.saveWidgetData<String>('title', title);
-    await HomeWidget.saveWidgetData<String>('content', menuText);
+    // --- [중요] 데이터 저장 (XML ID와 Key 일치시키기) ---
+
+    // 1. 식당 이름 -> widget_title
+    await HomeWidget.saveWidgetData<String>('widget_title', sourceName);
+
+    // 2. 시간대(오늘 점심) -> widget_time
+    await HomeWidget.saveWidgetData<String>('widget_time', timeText);
+
+    // 3. 메뉴 내용 -> widget_menu
+    await HomeWidget.saveWidgetData<String>('widget_menu', menuText);
+
+    // 4. 기타 설정 (투명도 등)
     await HomeWidget.saveWidgetData<String>('source', sourceName);
     await HomeWidget.saveWidgetData<int>('themeMode', widgetTheme.value.index);
     await HomeWidget.saveWidgetData<String>(
@@ -276,11 +281,7 @@ Future<void> _updateWidgetWithData(
       widgetTransparency.value.toString(),
     );
 
-    // 디버그: 저장된 데이터 확인
-    final savedTitle = await HomeWidget.getWidgetData<String>('title');
-    print("저장 확인 - title: $savedTitle");
-
-    // 위젯 업데이트
+    // 위젯 업데이트 요청 (AndroidManifest의 리시버 이름과 일치해야 함)
     await HomeWidget.updateWidget(name: 'MealWidgetProvider');
 
     print("=== 위젯 데이터 업데이트 완료 ===");
@@ -387,33 +388,36 @@ Future<void> forceUpdateWidgetWithCurrentSettings() async {
     final now = DateTime.now();
     final hour = now.hour;
 
-    String title = "";
-    String content = "";
+    String timeText = "";
     String sourceName = widgetSource.value == MealSource.a ? "기숙사 식당" : "학생회관";
 
     if (widgetSource.value == MealSource.a) {
       if (hour < 9) {
-        title = "오늘 아침";
+        timeText = "오늘 아침";
       } else if (hour < 13) {
-        title = "오늘 점심";
+        timeText = "오늘 점심";
       } else {
-        title = "오늘 저녁";
+        timeText = "오늘 저녁";
       }
     } else {
       if (hour < 14) {
-        title = "오늘 점심";
+        timeText = "오늘 점심";
       } else {
-        title = "오늘 저녁";
+        timeText = "오늘 저녁";
       }
     }
 
-    content = "$sourceName의 $title 메뉴를 불러오는 중...";
+    // 메뉴 칸에 표시할 로딩 문구
+    String loadingText = "정보를 불러오는 중...";
 
-    print("위젯 데이터 설정: $sourceName, $title");
+    print("위젯 데이터 설정: $sourceName, $timeText");
 
-    // 데이터 저장
-    await HomeWidget.saveWidgetData<String>('title', title);
-    await HomeWidget.saveWidgetData<String>('content', content);
+    // --- [중요] 데이터 저장 (키값 수정) ---
+    await HomeWidget.saveWidgetData<String>('widget_title', sourceName);
+    await HomeWidget.saveWidgetData<String>('widget_time', timeText);
+    await HomeWidget.saveWidgetData<String>('widget_menu', loadingText);
+
+    // 기타 설정 저장
     await HomeWidget.saveWidgetData<String>('source', sourceName);
     await HomeWidget.saveWidgetData<int>('themeMode', widgetTheme.value.index);
     await HomeWidget.saveWidgetData<String>(
