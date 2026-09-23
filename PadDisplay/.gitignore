@@ -1,0 +1,5 @@
+*.xcodeproj
+MacHost/Info.plist
+PadClient/Info.plist
+build/
+DerivedData/
