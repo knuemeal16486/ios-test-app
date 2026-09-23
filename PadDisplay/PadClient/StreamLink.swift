@@ -19,9 +19,17 @@ final class StreamLink {
     private var bytes = 0
     private var rttMillis: Double = 0
 
-    init(endpoint: NWEndpoint, renderer: VideoRenderer) {
+    let isWired: Bool
+
+    convenience init(endpoint: NWEndpoint, renderer: VideoRenderer) {
+        self.init(connection: NWConnection(to: endpoint, using: .padDisplay()), renderer: renderer, isWired: false)
+    }
+
+    /// USB 터널로 들어온(아직 start 안 된) 연결에도 사용
+    init(connection nwConnection: NWConnection, renderer: VideoRenderer, isWired: Bool) {
         self.renderer = renderer
-        connection = FramedConnection(connection: NWConnection(to: endpoint, using: .padDisplay()))
+        self.isWired = isWired
+        connection = FramedConnection(connection: nwConnection)
         connection.onReady = { [weak self] in
             self?.startPing()
             self?.onReady?()

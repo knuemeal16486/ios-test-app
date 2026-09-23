@@ -58,6 +58,8 @@ struct HostMenuView: View {
                 ForEach(ScaleMode.allCases) { mode in Text(mode.title).tag(mode) }
             }
 
+            Toggle(controller.usbDeviceCount > 0 ? "USB 유선 연결 (iPad 감지됨)" : "USB 유선 연결",
+                   isOn: $controller.settings.usbEnabled)
             Toggle("iPad를 주 디스플레이로 설정", isOn: $controller.settings.makeMain)
             Toggle("연결 해제 후에도 가상 디스플레이 유지", isOn: $controller.settings.keepDisplayOnDisconnect)
             Toggle("로그인 시 자동 실행", isOn: Binding(get: { controller.launchAtLogin },

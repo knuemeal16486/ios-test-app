@@ -9,7 +9,7 @@ Mac에 **실제 가상 디스플레이**를 만들고, 그 화면을 HEVC로 인
 │   └ ScreenCaptureKit (420v, 60/120Hz)                            │  TCP   │ AVSampleBufferDisplayLayer (HW 디코드, │
 │       └ VideoToolbox HEVC 저지연 RC, B프레임 없음 ───────────────┼──────▶ │   DisplayImmediately)                  │
 │ CGEvent 주입 (마우스·스크롤·키보드) ◀────────────────────────────┼─────── │ 제스처/HID 키 → InputEvent             │
-└──────────────────────────────────────────────────────────────────┘ Bonjour└────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────┘  USB-C (usbmuxd) 또는 Wi-Fi (Bonjour)  └──────┘
 ```
 
 ## 구성
@@ -44,6 +44,22 @@ open PadDisplay.xcodeproj
 4. 헤드리스(모니터 없이) 운용 시: 시스템 설정 → 사용자 및 그룹 → **자동 로그인** 활성화
    (FileVault가 켜져 있으면 자동 로그인 불가 — 아래 제약 참고).
 
+## 유선 연결 (USB-C)
+
+iPad Pro를 Mac mini에 USB-C 케이블로 연결하면 **자동으로 유선 모드**가 된다. 별도 조작 없음.
+
+```
+Mac: UsbDeviceMonitor ──/var/run/usbmuxd──(USB)──▶ iPad usbmuxd ──▶ 127.0.0.1:52101 (PadDisplay 앱)
+```
+
+- Xcode·Finder가 기기와 통신하는 것과 같은 `usbmuxd` 터널. 네트워크 설정·IP 불필요, Wi-Fi 없이도 동작.
+- 최초 1회: 케이블 연결 후 iPad에서 **"이 컴퓨터를 신뢰하겠습니까?" → 신뢰**.
+- Mac 앱은 USB iPad를 감지하면 2초 주기로 접속을 시도 → iPad 앱을 열면 즉시 연결.
+- **USB 우선**: Wi-Fi로 보는 중 케이블을 꽂으면 USB로 전환, 뽑으면 Wi-Fi로 자동 폴백.
+- USB 세션 중에는 Mac이 Wi-Fi 연결을 받지 않아 두 경로가 서로 끊는 일이 없다.
+- 유선에서는 비트레이트를 80~150Mbps, 주사율 120Hz까지 올려도 된다.
+- Mac 메뉴의 **USB 유선 연결** 토글로 끌 수 있다 (iPad 감지 여부 표시).
+
 ## iPad 조작
 
 | 입력 | Mac 동작 |
@@ -63,7 +79,7 @@ open PadDisplay.xcodeproj
 | 해상도 | 기본 1376×1032pt (2752×2064px, 1:1 픽셀) | 스케일링 없음 → 텍스트 선명 |
 | 주사율 | 60Hz (유선/5GHz 양호 시 120Hz) | 120Hz는 대역폭·인코더 부하 2배 |
 | 비트레이트 | 40Mbps (Wi-Fi 6) / 80Mbps+ (유선) | 텍스트 위주 화면은 정지 시 프레임이 거의 없음 |
-| 연결 | 같은 AP의 5/6GHz 또는 USB-C 이더넷 어댑터 | Bonjour 자동 검색. AWDL(P2P Wi-Fi)도 허용됨 |
+| 연결 | **USB-C 케이블 직결** (권장) / 같은 AP의 5/6GHz Wi-Fi | 유선: 지터·재전송 없음, 충전 동시 |
 
 ## 지연·안정성 설계
 
@@ -81,7 +97,6 @@ open PadDisplay.xcodeproj
 - **비공개 API(CGVirtualDisplay)** 사용 → App Store 배포 불가, macOS 업데이트로 깨질 수 있음 (DeskPad·BetterDisplay와 동일 방식).
 - macOS 15+는 ScreenCaptureKit 사용 앱에 대해 주기적으로 화면 기록 재확인 알림을 띄울 수 있다 → iPad 화면에서 '허용'.
 - iPadOS가 선점하는 단축키(⌘Tab, ⌘Space, 지구본 키 조합 등)는 Mac으로 전달되지 않는다.
-- 유선 USB-C 직결(usbmuxd) 전송은 미구현. 유선이 필요하면 iPad에 USB-C 이더넷 어댑터를 사용.
 - Apple 기본 기능 **Sidecar**로도 iPad를 확장 디스플레이로 쓸 수 있으나, 매번 Mac에서 수동 연결해야 하고 헤드리스 주 모니터 운용이 불편하다. 이 앱은 그 공백(자동 연결·주 디스플레이 고정)을 메운다.
 
 ## 프로토콜

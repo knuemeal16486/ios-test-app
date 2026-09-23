@@ -38,7 +38,10 @@ final class ClientController: ObservableObject, RemoteInputSink {
     }
 
     private var browser: NWBrowser?
+    private var usbListener: NWListener?
     private var link: StreamLink?
+    /// 마지막 연결이 USB였는지 (복귀 시 Wi-Fi보다 USB 재접속을 먼저 기다림)
+    private var preferWired = false
     private var target: (endpoint: NWEndpoint, name: String)?
     private var serverInfo: ServerInfo?
     private var userDisconnected = false
@@ -55,6 +58,7 @@ final class ClientController: ObservableObject, RemoteInputSink {
         autoConnect = defaults.object(forKey: Keys.autoConnect) as? Bool ?? true
         manualAddress = defaults.string(forKey: Keys.manualAddress) ?? ""
         startBrowsing()
+        startUsbListener()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -69,7 +73,7 @@ final class ClientController: ObservableObject, RemoteInputSink {
         switch phase {
         case .idle: return suspended ? "일시 정지됨" : "연결할 Mac을 선택하세요"
         case .connecting(let name): return "\(name)에 연결 중…"
-        case .streaming(let name): return "\(name) 스트리밍 중"
+        case .streaming(let name): return "\(name) 스트리밍 중\(link?.isWired == true ? " · USB" : " · Wi-Fi")"
         case .reconnecting(let name): return "\(name) 재연결 중…"
         }
     }
@@ -115,7 +119,10 @@ final class ClientController: ObservableObject, RemoteInputSink {
         lastError = nil
         if case .reconnecting = phase {} else { phase = .connecting(name) }
 
-        let link = StreamLink(endpoint: endpoint, renderer: renderer)
+        attach(StreamLink(endpoint: endpoint, renderer: renderer), name: name)
+    }
+
+    private func attach(_ link: StreamLink, name: String) {
         link.onReady = { [weak self, weak link] in
             Task { @MainActor in
                 guard let self, let link, link === self.link else { return }
@@ -127,7 +134,8 @@ final class ClientController: ObservableObject, RemoteInputSink {
             Task { @MainActor in
                 guard let self, let link, link === self.link else { return }
                 self.serverInfo = info
-                self.phase = .streaming(name)
+                self.preferWired = link.isWired
+                self.phase = .streaming(link.isWired ? info.hostName : name)
                 UIApplication.shared.isIdleTimerDisabled = true
             }
         }
@@ -152,6 +160,22 @@ final class ClientController: ObservableObject, RemoteInputSink {
         link = nil
         UIApplication.shared.isIdleTimerDisabled = false
         if let error { lastError = error.localizedDescription }
+        if closed.isWired {
+            // 케이블 분리 등 → Wi-Fi로 폴백 (Mac이 USB 재접속하면 다시 USB로 전환됨)
+            preferWired = false
+            phase = .idle
+            if let target, !suspended, !userDisconnected {
+                phase = .reconnecting(target.name)
+                reconnectTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    guard !Task.isCancelled, self.link == nil, let target = self.target else { return }
+                    self.open(endpoint: target.endpoint, name: target.name)
+                }
+            } else {
+                autoConnectIfNeeded()
+            }
+            return
+        }
         guard let target, !suspended, !userDisconnected else {
             phase = .idle
             return
@@ -175,10 +199,64 @@ final class ClientController: ObservableObject, RemoteInputSink {
         case .active:
             guard suspended else { return }
             suspended = false
-            if let target { open(endpoint: target.endpoint, name: target.name) } else { autoConnectIfNeeded() }
+            if usbListener == nil { startUsbListener() }
+            // USB였다면 Mac이 2초 주기로 터널을 재시도하므로 잠시 기다렸다가 Wi-Fi로 폴백
+            let delay: UInt64 = preferWired ? 3_000_000_000 : 0
+            reconnectTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled, self.link == nil, !self.suspended else { return }
+                if let target = self.target {
+                    self.open(endpoint: target.endpoint, name: target.name)
+                } else {
+                    self.autoConnectIfNeeded()
+                }
+            }
         default:
             break
         }
+    }
+
+    // MARK: - USB (usbmuxd 터널 수신)
+
+    private func startUsbListener() {
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true
+        let params = NWParameters(tls: nil, tcp: tcp)
+        params.requiredInterfaceType = .loopback // usbmuxd가 기기 내부 루프백으로 접속
+        params.allowLocalEndpointReuse = true
+        guard let port = NWEndpoint.Port(rawValue: PadDisplayConstants.usbPort),
+              let listener = try? NWListener(using: params, on: port) else { return }
+        listener.newConnectionHandler = { [weak self] connection in
+            Task { @MainActor in
+                guard let self else { connection.cancel(); return }
+                self.acceptWired(connection)
+            }
+        }
+        listener.stateUpdateHandler = { [weak self] state in
+            if case .failed = state {
+                Task { @MainActor in
+                    self?.usbListener?.cancel()
+                    self?.usbListener = nil
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if self?.usbListener == nil { self?.startUsbListener() }
+                }
+            }
+        }
+        listener.start(queue: .main)
+        usbListener = listener
+    }
+
+    /// USB가 항상 우선: 기존 Wi-Fi 연결을 대체한다. Wi-Fi 대상(target)은 폴백용으로 유지.
+    private func acceptWired(_ connection: NWConnection) {
+        guard !suspended else { connection.cancel(); return }
+        reconnectTask?.cancel()
+        closeLink()
+        renderer.reset()
+        serverInfo = nil
+        lastError = nil
+        userDisconnected = false
+        phase = .connecting("USB")
+        attach(StreamLink(connection: connection, renderer: renderer, isWired: true), name: "USB")
     }
 
     // MARK: - Discovery

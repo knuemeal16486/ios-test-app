@@ -11,7 +11,10 @@ final class HostController: ObservableObject {
             guard settings != oldValue else { return }
             settings.save()
             if !settings.keepDisplayOnDisconnect, session == nil { virtualDisplay = nil }
-            if let hello = lastHello, session != nil { scheduleReconfigure(hello) }
+            usb.setEnabled(settings.usbEnabled)
+            let streamChanged = settings.fps != oldValue.fps || settings.bitrateMbps != oldValue.bitrateMbps
+                || settings.scaleMode != oldValue.scaleMode || settings.makeMain != oldValue.makeMain
+            if streamChanged, let hello = lastHello, session != nil { scheduleReconfigure(hello) }
         }
     }
     @Published private(set) var status = "iPad 연결 대기 중"
@@ -21,9 +24,14 @@ final class HostController: ObservableObject {
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var launchAtLogin = false
     @Published private(set) var hasVirtualDisplay = false
+    /// 현재 세션이 USB 유선인지 (nil = 연결 없음)
+    @Published private(set) var isWired: Bool?
+    @Published private(set) var usbDeviceCount = 0
 
     private var listener: NWListener?
+    private let usb = UsbDeviceMonitor()
     private var session: StreamSession?
+    private var sessionDeviceID: Int?
     private var virtualDisplay: VirtualDisplay? {
         didSet { hasVirtualDisplay = virtualDisplay != nil }
     }
@@ -39,6 +47,16 @@ final class HostController: ObservableObject {
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         startListener()
+        usb.onTunnel = { [weak self] connection, queue, deviceID in
+            Task { @MainActor in
+                guard let self else { connection.cancel(); return }
+                self.accept(connection, queue: queue, usbDeviceID: deviceID)
+            }
+        }
+        usb.onDevicesChanged = { [weak self] count in
+            Task { @MainActor in self?.usbDeviceCount = count }
+        }
+        usb.setEnabled(settings.usbEnabled)
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -84,7 +102,7 @@ final class HostController: ObservableObject {
                                           on: NWEndpoint.Port(rawValue: PadDisplayConstants.defaultPort)!)
             listener.service = NWListener.Service(name: hostName, type: PadDisplayConstants.serviceType)
             listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor in self?.accept(connection) }
+                Task { @MainActor in self?.accept(connection, queue: nil, usbDeviceID: nil) }
             }
             listener.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor in self?.listenerStateChanged(state) }
@@ -113,9 +131,25 @@ final class HostController: ObservableObject {
         }
     }
 
-    private func accept(_ nwConnection: NWConnection) {
-        session?.close() // 단일 클라이언트: 새 연결이 기존 연결을 대체
-        let session = StreamSession(connection: FramedConnection(connection: nwConnection))
+    /// 단일 클라이언트: 새 연결이 기존 연결을 대체. 단, USB 세션 중에는 Wi-Fi 연결을 받지 않는다.
+    private func accept(_ nwConnection: NWConnection, queue: DispatchQueue?, usbDeviceID: Int?) {
+        if usbDeviceID == nil, isWired == true {
+            nwConnection.cancel()
+            return
+        }
+        if let old = session {
+            if let oldID = sessionDeviceID { usb.tunnelClosed(deviceID: oldID) }
+            old.onClosed = nil
+            old.close()
+            Task { await old.stopStreaming() }
+        }
+        let framed: FramedConnection
+        if let queue {
+            framed = FramedConnection(connection: nwConnection, queue: queue, alreadyStarted: true)
+        } else {
+            framed = FramedConnection(connection: nwConnection)
+        }
+        let session = StreamSession(connection: framed)
         session.onHello = { [weak self, weak session] hello in
             Task { @MainActor in
                 guard let self, let session, session === self.session else { return }
@@ -132,14 +166,19 @@ final class HostController: ObservableObject {
             Task { @MainActor in self?.status = "캡처 중단: \(error.localizedDescription)" }
         }
         self.session = session
-        status = "iPad 연결 중…"
+        sessionDeviceID = usbDeviceID
+        isWired = usbDeviceID != nil
+        status = usbDeviceID != nil ? "iPad 연결 중… (USB)" : "iPad 연결 중… (Wi-Fi)"
         session.start()
     }
 
     private func sessionClosed(_ closed: StreamSession) {
         Task { await closed.stopStreaming() }
         guard closed === session else { return }
+        if let id = sessionDeviceID { usb.tunnelClosed(deviceID: id) }
         session = nil
+        sessionDeviceID = nil
+        isWired = nil
         clientName = nil
         stats = ""
         status = "iPad 연결 대기 중"
@@ -212,7 +251,7 @@ final class HostController: ObservableObject {
                                              bitrate: settings.bitrateMbps * 1_000_000)
             session.send(ServerInfo(hostName: hostName, codec: "hevc", fps: fps, bitrateMbps: settings.bitrateMbps,
                                     displayPointWidth: pointWidth, displayPointHeight: pointHeight))
-            status = "스트리밍 중 · \(pointWidth)×\(pointHeight)pt @\(fps)Hz"
+            status = "스트리밍 중 (\(isWired == true ? "USB" : "Wi-Fi")) · \(pointWidth)×\(pointHeight)pt @\(fps)Hz"
         } catch {
             refreshPermissions()
             status = "캡처 시작 실패: \(error.localizedDescription)"

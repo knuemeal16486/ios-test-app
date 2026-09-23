@@ -28,8 +28,23 @@ struct HostSettings: Codable, Equatable {
     var scaleMode = ScaleMode.retina
     var makeMain = true
     var keepDisplayOnDisconnect = true
+    var usbEnabled = true
 
     private static let key = "hostSettings"
+
+    init() {}
+
+    /// 누락된 키는 기본값 유지 (설정 항목이 늘어나도 기존 설정 보존)
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = HostSettings()
+        fps = try c.decodeIfPresent(Int.self, forKey: .fps) ?? d.fps
+        bitrateMbps = try c.decodeIfPresent(Int.self, forKey: .bitrateMbps) ?? d.bitrateMbps
+        scaleMode = try c.decodeIfPresent(ScaleMode.self, forKey: .scaleMode) ?? d.scaleMode
+        makeMain = try c.decodeIfPresent(Bool.self, forKey: .makeMain) ?? d.makeMain
+        keepDisplayOnDisconnect = try c.decodeIfPresent(Bool.self, forKey: .keepDisplayOnDisconnect) ?? d.keepDisplayOnDisconnect
+        usbEnabled = try c.decodeIfPresent(Bool.self, forKey: .usbEnabled) ?? d.usbEnabled
+    }
 
     static func load() -> HostSettings {
         guard let data = UserDefaults.standard.data(forKey: key),

@@ -29,11 +29,15 @@ final class FramedConnection {
     private let lock = NSLock()
     private var pending = 0
     private var closed = false
+    private let alreadyStarted: Bool
 
+    /// - Parameter alreadyStarted: 이미 `queue`에서 start되어 ready 상태인 연결(USB 터널 등)
     init(connection: NWConnection,
-         queue: DispatchQueue = DispatchQueue(label: "paddisplay.connection", qos: .userInteractive)) {
+         queue: DispatchQueue = DispatchQueue(label: "paddisplay.connection", qos: .userInteractive),
+         alreadyStarted: Bool = false) {
         self.connection = connection
         self.queue = queue
+        self.alreadyStarted = alreadyStarted
     }
 
     /// 전송 대기 중인 바이트 수 (혼잡 제어용)
@@ -52,7 +56,11 @@ final class FramedConnection {
             default: break
             }
         }
-        connection.start(queue: queue)
+        if alreadyStarted {
+            queue.async { [weak self] in self?.onReady?() }
+        } else {
+            connection.start(queue: queue)
+        }
         readHeader()
     }
 

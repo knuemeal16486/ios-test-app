@@ -3,6 +3,8 @@ import Foundation
 enum PadDisplayConstants {
     static let serviceType = "_paddisplay._tcp"
     static let defaultPort: UInt16 = 52100
+    /// iPad가 루프백에서 대기하는 포트. Mac이 usbmuxd USB 터널로 접속한다.
+    static let usbPort: UInt16 = 52101
     static let protocolVersion = 1
     static let maxMessageSize = 32 * 1024 * 1024
     /// iPad Pro (M4) 13" 패널 밀도
