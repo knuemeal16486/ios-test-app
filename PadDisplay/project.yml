@@ -1,0 +1,74 @@
+name: PadDisplay
+options:
+  bundleIdPrefix: com.example.paddisplay
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    # Xcode > Signing & Capabilities 에서 개인 팀을 선택하거나 아래에 Team ID 입력
+    DEVELOPMENT_TEAM: ""
+targets:
+  PadDisplayHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: MacHost
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.paddisplay.host
+        PRODUCT_NAME: PadDisplay Host
+        SWIFT_OBJC_BRIDGING_HEADER: MacHost/CGVirtualDisplayPrivate.h
+        # 비공개 API + CGEvent 주입 → 샌드박스 불가
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: MacHost/Info.plist
+      properties:
+        CFBundleDisplayName: PadDisplay Host
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.utilities
+        NSLocalNetworkUsageDescription: iPad를 디스플레이로 연결하기 위해 로컬 네트워크를 사용합니다.
+        NSBonjourServices:
+          - _paddisplay._tcp
+    scheme: {}
+
+  PadDisplayClient:
+    type: application
+    platform: iOS
+    sources:
+      - path: PadClient
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.paddisplay.client
+        PRODUCT_NAME: PadDisplay
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTS_MACCATALYST: NO
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: PadClient/Info.plist
+      properties:
+        CFBundleDisplayName: PadDisplay
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UIApplicationSupportsIndirectInputEvents: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+        NSLocalNetworkUsageDescription: 같은 네트워크의 Mac을 찾고 화면을 수신하기 위해 로컬 네트워크를 사용합니다.
+        NSBonjourServices:
+          - _paddisplay._tcp
+    scheme: {}
